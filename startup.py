@@ -3,6 +3,7 @@ import time
 from sys import argv
 
 import docker
+import re
 from docker import errors
 from docker.types import IPAMConfig
 from docker.types import IPAMPool
@@ -12,7 +13,8 @@ import db_docker
 
 
 def load_config():
-    global curr_dir, db_ipv4_address, app_ipv4_address, db_port, app_port, db_name, db_image_tag, app_image_tag, db_instance_name, app_instance_name
+    # TODO load from configuration file
+    global app_host_name, db_host_name, curr_dir, db_ipv4_address, app_ipv4_address, db_port, app_port, db_name, db_image_tag, app_image_tag, db_instance_name, app_instance_name
     db_ipv4_address = '124.25.1.5'
     app_ipv4_address = '124.25.1.6'
     db_port = 27017
@@ -23,6 +25,8 @@ def load_config():
     db_instance_name = 'db_instance'
     app_instance_name = 'app_instance'
     curr_dir = os.path.dirname(os.path.abspath(__file__))
+    db_host_name = 'db.dev-ops.local'
+    app_host_name = 'app.dev-ops.local'
 
 
 def create_env_file():
@@ -30,7 +34,7 @@ def create_env_file():
     try:
         print('Setting up environment for building application image')
         port = 'PORT=%d' % app_port
-        db_url = "DB_URL='mongodb://%s:%d/%s'" % (db_ipv4_address, db_port, db_name)
+        db_url = "DB_URL='mongodb://%s:%d/%s'" % (db_host_name, db_port, db_name)
         print('Creating env file: \n%s' % file_path)
         fo = open(file_path, "w")
         fo.write('%s\n%s\n' % (port, db_url))
@@ -54,6 +58,16 @@ def create_image(client, path, tag):
         print('Image Created')
     except errors.BuildError:
         print('Error Building Application Image')
+
+
+# noinspection PyRedundantParentheses
+def get_ip_address(db_container):
+    for result in db_container.exec_run(cmd='cat /etc/hosts', stream=True):
+        for line in re.split('\\n', result):
+            if (db_host_name in line):
+                ip = re.findall(r'[0-9]+(?:\.[0-9]+){3}', line)
+                if (ip):
+                    return ip
 
 
 # noinspection PyRedundantParentheses
@@ -92,14 +106,20 @@ def run_or_start_db_container(client):
             print('Database Image not found in local repository.\nAttempting to create Database Image.')
             build_db_img()
         try:
+
             print('\tRunning %s container' % db_instance_name)
             db_container = client.containers.run(db_image_tag, name=db_instance_name,
                                                  tty=True,
+                                                 hostname=db_host_name,
                                                  detach=True)
-
-            network_bridge = get_network_interface(client)
-            network_bridge.connect(db_container, ipv4_address=db_ipv4_address)
             time.sleep(30)
+            ip = get_ip_address(db_container)
+            if ip and len(ip) == 1:
+                return ip
+            else:
+                network_bridge = get_network_interface(client)
+                network_bridge.connect(db_container, ipv4_address=db_ipv4_address)
+
         except docker.errors.ContainerError:
             print('Error')
         except docker.errors.ImageNotFound:
@@ -107,7 +127,7 @@ def run_or_start_db_container(client):
 
 
 # noinspection PyRedundantParentheses
-def run_or_start_app_container(client):
+def run_or_start_app_container(client, ip=[]):
     containers = client.containers.list(all=True, filters={'name': app_instance_name})  # Get running containers
 
     if (containers):
@@ -123,16 +143,28 @@ def run_or_start_app_container(client):
             print('Database Image not found in local repository.\nAttempting to create Application Image.')
             build_app_img()
         try:
-            print('\tRunning %s container' % app_instance_name)
-            app_container = client.containers.run(app_image_tag, name=app_instance_name,
-                                                  ports={'3000/tcp': 3000},
-                                                  tty=True,
-                                                  detach=True)
 
             network_bridge = get_network_interface(client)
-            network_bridge.connect(app_container
-                                   # , ipv4_address=app_ipv4_address
-                                   )
+            print('\tRunning %s container' % app_instance_name)
+
+            if (ip):
+                address_ = {db_host_name: ip[0]}
+            else:
+                address_ = {db_host_name: db_ipv4_address}
+
+            app_container = client.containers.run(app_image_tag, name=app_instance_name,
+                                                  ports={'3000/tcp': 3000},
+                                                  hostname=app_host_name,
+                                                  extra_hosts=address_,
+                                                  tty=True,
+                                                  detach=True)
+            if (not ip):
+                network_bridge.connect(app_container
+                                       # , ipv4_address=app_ipv4_address
+                                       )
+            print('Running command')
+            for line in app_container.exec_run(cmd='cat /etc/hosts', stream=True):
+                print(line)
         except docker.errors.ContainerError:
             print('Error')
         except docker.errors.ImageNotFound:
@@ -141,8 +173,8 @@ def run_or_start_app_container(client):
 
 # noinspection PyRedundantParentheses
 def run(client):
-    run_or_start_db_container(client)
-    run_or_start_app_container(client)
+    ip = run_or_start_db_container(client)
+    run_or_start_app_container(client, ip)
 
 
 def build_app_img():
@@ -182,34 +214,6 @@ def stop_container(client, instance):
             db_container.stop()
             print('Stopped')
         return db_container
-
-
-"""
-def run_test():
-    print 'TODO'
-
-
-    host = 'localhost'
-    endpoint = 'users'
-    data_param = {
-        'name': 'Morolari Titilope',
-        'email': 'tmorolari@gmail.com',
-        'github': 'https://github.com/macphilips'
-    }
-    endpoint_ = 'http://%s:%d/%s' % (host, app_port, endpoint)
-    print endpoint_
-    params = urllib.urlencode(data_param)
-    headers = {"Content-type": "application/x-www-form-urlencoded",
-               "Accept": "text/plain"}
-    conn = httplib.HTTPConnection(endpoint_)
-    conn.request("GET", "", params, headers)
-    response = conn.getresponse()
-    print response.status, response.reason
-    data = response.read()
-    print data
-    conn.close()
-
-    """
 
 
 # noinspection PyGlobalUndefined,PyRedundantParentheses
