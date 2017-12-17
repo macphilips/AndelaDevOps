@@ -51,15 +51,6 @@ def image_exist(client, image_name):
         return False
 
 
-def create_image(client, path, tag):
-    try:
-        print('Creating Image from %s' % path + '\\Dockerfile')
-        client.images.build(path=path, rm=True, quiet=True, tag=tag)
-        print('Image Created')
-    except errors.BuildError:
-        print('Error Building Application Image')
-
-
 # noinspection PyRedundantParentheses
 def get_ip_address(db_container):
     for result in db_container.exec_run(cmd='cat /etc/hosts', stream=True):
@@ -162,9 +153,12 @@ def run_or_start_app_container(client, ip=[]):
                 network_bridge.connect(app_container
                                        # , ipv4_address=app_ipv4_address
                                        )
+
+            """
             print('Running command')
             for line in app_container.exec_run(cmd='cat /etc/hosts', stream=True):
                 print(line)
+            """
         except docker.errors.ContainerError:
             print('Error')
         except docker.errors.ImageNotFound:
