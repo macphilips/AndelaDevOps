@@ -7,6 +7,9 @@ from docker import errors
 from docker.types import IPAMConfig
 from docker.types import IPAMPool
 
+import app_docker
+import db_docker
+
 curr_dir = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -43,8 +46,7 @@ def image_exist(client, image_name):
 
 def create_image(client, path, tag):
     try:
-
-        print('Creating Image')
+        print('Creating Image from %s' % path + '\\Dockerfile')
         client.images.build(path=path, rm=True, quiet=True, tag=tag)
         print('Image Created')
     except errors.BuildError:
@@ -85,7 +87,7 @@ def run_or_start_db_container(client):
     else:
         if (not image_exist(client, db_image_tag)):
             print('Database Image not found in local repository.\nAttempting to create Database Image.')
-            build_db_img(client)
+            build_db_img()
 
         print('\tRunning %s container' % db_instance_name)
         db_container = client.containers.run(db_image_tag, name=db_instance_name,
@@ -112,7 +114,7 @@ def run_or_start_app_container(client):
     else:
         if (not image_exist(client, app_image_tag)):
             print('Database Image not found in local repository.\nAttempting to create Application Image.')
-            build_app_img(client)
+            build_app_img()
 
         print('\tRunning %s container' % app_instance_name)
         app_container = client.containers.run(app_image_tag, name=app_instance_name,
@@ -132,19 +134,21 @@ def run(client):
     run_or_start_app_container(client)
 
 
-def build_app_img(client):
-    path = curr_dir + '\\app_docker'
-    create_image(client=client, path=path, tag=app_image_tag)
+def build_app_img():
+    # path = curr_dir + '\\app_docker'
+    # create_image(client=client, path=path, tag=app_image_tag)
+    app_docker.create_app_image(app_image_tag)
 
 
-def build_db_img(client):
-    path = curr_dir + '\\db_docker'
-    create_image(client=client, path=path, tag=db_image_tag)
+def build_db_img():
+    # path = curr_dir + '\\db_docker'
+    # create_image(client=client, path=path, tag=db_image_tag)
+    db_docker.create_db_image(db_image_tag)
 
 
-def build_image(client):
-    build_db_img(client)
-    build_app_img(client)
+def build_image():
+    build_db_img()
+    build_app_img()
 
 
 # noinspection PyRedundantParentheses
@@ -204,36 +208,6 @@ def main():
     if (__name__ == '__main__'):
         args = (argv[1:])
 
-        if ('init' in args):
-            print('-init')
-            create_env_file()
-            build_image(_client)
-            run(_client)
-            # run_test()
-            return
-
-        if ('build' in args):  # Example usage.
-            create_env_file()
-            build_image(_client)
-
-        if ('build-app' in args):
-            build_app_img(_client)
-
-        if ('build-db' in args):
-            build_db_img(_client)
-
-        if ('run' in args or len(argv) == 1):
-            print('-run')
-            run(_client)
-
-        if ('run-db' in args):
-            print('Start Database Container ')
-            run_or_start_db_container(_client)
-
-        if ('run-app' in args):
-            print('Start Application Container ')
-            run_or_start_app_container(_client)
-
         if ('clean' in args):
             clean_container(_client, db_instance_name)
             clean_container(_client, app_instance_name)
@@ -248,6 +222,36 @@ def main():
 
             # if ('test' in args):
             # run_test()
+
+        if ('init' in args):
+            print('-init')
+            create_env_file()
+            build_image()
+            run(_client)
+            # run_test()
+            return
+
+        if ('build' in args):  # Example usage.
+            create_env_file()
+            build_image()
+
+        if ('build-app' in args):
+            build_app_img()
+
+        if ('build-db' in args):
+            build_db_img()
+
+        if ('run' in args or len(argv) == 1):
+            print('-run')
+            run(_client)
+
+        if ('run-db' in args):
+            print('Start Database Container ')
+            run_or_start_db_container(_client)
+
+        if ('run-app' in args):
+            print('Start Application Container ')
+            run_or_start_app_container(_client)
 
         if ('stop' in args):
             stop_container(_client, db_instance_name)

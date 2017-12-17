@@ -21,6 +21,7 @@ Visit [Docker's website](https://docs.docker.com/engine/installation/) to downlo
 Install [Docker SDK](https://github.com/docker/docker-py) using pip
 ```
 $ pip install docker
+$ pip install pypiwin32
 ```
 
 ## Usage
