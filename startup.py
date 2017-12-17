@@ -10,11 +10,9 @@ from docker.types import IPAMPool
 import app_docker
 import db_docker
 
-curr_dir = os.path.dirname(os.path.abspath(__file__))
-
 
 def load_config():
-    global db_ipv4_address, app_ipv4_address, db_port, app_port, db_name, db_image_tag, app_image_tag, db_instance_name, app_instance_name
+    global curr_dir, db_ipv4_address, app_ipv4_address, db_port, app_port, db_name, db_image_tag, app_image_tag, db_instance_name, app_instance_name
     db_ipv4_address = '124.25.1.5'
     app_ipv4_address = '124.25.1.6'
     db_port = 27017
@@ -24,16 +22,21 @@ def load_config():
     app_image_tag = 'app_img'
     db_instance_name = 'db_instance'
     app_instance_name = 'app_instance'
+    curr_dir = os.path.dirname(os.path.abspath(__file__))
 
 
 def create_env_file():
-    curr_dir = os.path.dirname(os.path.abspath(__file__))
-    path_to_app_dockerfile = '%s\%s' % (curr_dir, 'app_docker')
-    port = 'PORT=%d\n' % app_port
-    db_url = "DB_URL='mongodb://%s:%d/%s'\n" % (db_ipv4_address, db_port, db_name)
-    fo = open("%s\\env" % path_to_app_dockerfile, "w")
-    fo.write('%s%s' % (port, db_url))
-    fo.close()
+    file_path = os.path.join(curr_dir, 'app_docker', 'env')
+    try:
+        print('Setting up environment for building application image')
+        port = 'PORT=%d' % app_port
+        db_url = "DB_URL='mongodb://%s:%d/%s'" % (db_ipv4_address, db_port, db_name)
+        print('Creating env file: \n%s' % file_path)
+        fo = open(file_path, "w")
+        fo.write('%s\n%s\n' % (port, db_url))
+        fo.close()
+    except IOError:
+        print('Unable to create %s' % file_path)
 
 
 def image_exist(client, image_name):
@@ -88,15 +91,19 @@ def run_or_start_db_container(client):
         if (not image_exist(client, db_image_tag)):
             print('Database Image not found in local repository.\nAttempting to create Database Image.')
             build_db_img()
+        try:
+            print('\tRunning %s container' % db_instance_name)
+            db_container = client.containers.run(db_image_tag, name=db_instance_name,
+                                                 tty=True,
+                                                 detach=True)
 
-        print('\tRunning %s container' % db_instance_name)
-        db_container = client.containers.run(db_image_tag, name=db_instance_name,
-                                             tty=True,
-                                             detach=True)
-
-        network_bridge = get_network_interface(client)
-        network_bridge.connect(db_container, ipv4_address=db_ipv4_address)
-        time.sleep(30)
+            network_bridge = get_network_interface(client)
+            network_bridge.connect(db_container, ipv4_address=db_ipv4_address)
+            time.sleep(30)
+        except docker.errors.ContainerError:
+            print('Error')
+        except docker.errors.ImageNotFound:
+            print('Database Image not fount in Local repository.\nTry running python startup.py build-db')
 
 
 # noinspection PyRedundantParentheses
@@ -115,17 +122,21 @@ def run_or_start_app_container(client):
         if (not image_exist(client, app_image_tag)):
             print('Database Image not found in local repository.\nAttempting to create Application Image.')
             build_app_img()
+        try:
+            print('\tRunning %s container' % app_instance_name)
+            app_container = client.containers.run(app_image_tag, name=app_instance_name,
+                                                  ports={'3000/tcp': 3000},
+                                                  tty=True,
+                                                  detach=True)
 
-        print('\tRunning %s container' % app_instance_name)
-        app_container = client.containers.run(app_image_tag, name=app_instance_name,
-                                              ports={'3000/tcp': 3000},
-                                              tty=True,
-                                              detach=True)
-
-        network_bridge = get_network_interface(client)
-        network_bridge.connect(app_container
-                               # , ipv4_address=app_ipv4_address
-                               )
+            network_bridge = get_network_interface(client)
+            network_bridge.connect(app_container
+                                   # , ipv4_address=app_ipv4_address
+                                   )
+        except docker.errors.ContainerError:
+            print('Error')
+        except docker.errors.ImageNotFound:
+            print('Application Image not fount in Local repository.\nTry running python startup.py build-app')
 
 
 # noinspection PyRedundantParentheses
@@ -137,6 +148,7 @@ def run(client):
 def build_app_img():
     # path = curr_dir + '\\app_docker'
     # create_image(client=client, path=path, tag=app_image_tag)
+    create_env_file()
     app_docker.create_app_image(app_image_tag)
 
 
@@ -225,14 +237,13 @@ def main():
 
         if ('init' in args):
             print('-init')
-            create_env_file()
             build_image()
             run(_client)
             # run_test()
             return
 
         if ('build' in args):  # Example usage.
-            create_env_file()
+
             build_image()
 
         if ('build-app' in args):
