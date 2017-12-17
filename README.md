@@ -33,9 +33,9 @@ $ cd AndelaDevOps
 $ python startup.py [options]
 ```
 ### Options
-* ``run`` (default): This option is used run the create and start the both the application and database containers, or start the containers if it has been created. Use ``run-app`` to run the application container only and ``run-db`` to run database.
-* ``build``: This option is used to build the docker image file both the application server and database. Use ``build-app`` to build application server image file only and ``build-db`` for database image file.
 * ``init``: This option is used to setup, build, and run the Application Server (NodeJS) and Database (MongoDB) Image. The script first cleans any running instance of the application server and database. then it builds image files for the application server and database. Then create and starts container for the application server and database.
+* ``build``: This option is used to build the docker image file both the application server and database. Use ``build-app`` to build application server image file only and ``build-db`` for database image file.
+* ``run`` (default): This option is used run the create and start the both the application and database containers, or start the containers if it has been created. Use ``run-app`` to run the application container only and ``run-db`` to run database.
 * ``stop``: Stops running application server and database container. Use ``stop-app`` to stop application server container and ``stop-db`` for database container.
 * ``clean``: Stops running application server and database container. Use ``clean-app`` to stop application server container and ``clean-db`` for database container.
 
