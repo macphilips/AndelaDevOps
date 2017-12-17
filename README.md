@@ -18,7 +18,7 @@ To achieve this we have provided you a working [source code](https://github.com/
 ## Installation
 Visit [Docker's website](https://docs.docker.com/engine/installation/) to download and install docker on your PC.
 
-Install [Docker SDK](https://github.com/docker/docker-py) using pip
+Install [Docker SDK](https://docs.docker.com/develop/sdk/#python-sdk) using pip
 ```
 $ pip install docker
 $ pip install pypiwin32
