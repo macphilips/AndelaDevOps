@@ -76,6 +76,7 @@ def run_or_start_db_container(client):
             print('\tRunning %s container' % db_instance_name)
             client.containers.run(db_image_tag, name=db_instance_name,
                                   network=network_bridge.name,
+                                  hostname=db_instance_name,
                                   tty=True,
                                   detach=True)
 
@@ -112,6 +113,7 @@ def run_or_start_app_container(client):
             app_container = client.containers.run(app_image_tag, name=app_instance_name,
                                                   ports={'3000/tcp': 3000},
                                                   network=network_bridge.name,
+                                                  hostname=db_instance_name,
                                                   tty=True,
                                                   detach=True)
 
@@ -184,46 +186,51 @@ def main():
         args = (argv[1:])
 
         if ('clean' in args):
+            print('clean')
             clean_container(_client, db_instance_name)
             clean_container(_client, app_instance_name)
 
         if ('clean-db' in args):
-            print('Start Application Container ')
+            print('clean database container')
             clean_container(_client, db_instance_name)
 
         if ('clean-app' in args):
-            print('Start Application Container ')
+            print('clean application container')
             clean_container(_client, app_instance_name)
 
         if ('init' in args):
-            print('-init')
+            print('init')
             build_image()
             run(_client)
             return
 
         if ('build' in args):
+            print('build')
             build_image()
         if ('build-app' in args):
+            print('build application image')
             build_app_img()
         if ('build-db' in args):
+            print('build database image')
             build_db_img()
         if ('run' in args or len(argv) == 1):
-            print('-run')
+            print('run')
             run(_client)
         if ('run-db' in args):
-            print('Start Database Container ')
+            print('run database container')
             run_or_start_db_container(_client)
         if ('run-app' in args):
-            print('Start Application Container ')
+            print('run application container')
             run_or_start_app_container(_client)
         if ('stop' in args):
+            print('stop')
             stop_container(_client, db_instance_name)
             stop_container(_client, app_instance_name)
         if ('stop-db' in args):
-            print('Start Application Container ')
+            print('stop database container')
             stop_container(_client, db_instance_name)
         if ('stop-app' in args):
-            print('Start Application Container ')
+            print('stop application container')
             stop_container(_client, app_instance_name)
 
 
