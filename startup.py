@@ -4,6 +4,8 @@ from sys import argv
 
 import docker
 import re
+
+import requests
 from docker import errors
 from docker.types import IPAMConfig
 from docker.types import IPAMPool
@@ -14,33 +16,16 @@ import db_docker
 
 def load_config():
     # TODO load from configuration file
-    global app_host_name, db_host_name, curr_dir, db_ipv4_address, app_ipv4_address, db_port, app_port, db_name, db_image_tag, app_image_tag, db_instance_name, app_instance_name
-    db_ipv4_address = '124.25.1.5'
-    app_ipv4_address = '124.25.1.6'
+    global curr_dir, db_port, app_port, db_name, db_image_tag, app_image_tag, db_instance_name, app_instance_name
+
     db_port = 27017
     app_port = 3000
     db_name = 'andela_db'
     db_image_tag = 'db_mongo'
     app_image_tag = 'app_img'
-    db_instance_name = 'db_instance'
-    app_instance_name = 'app_instance'
     curr_dir = os.path.dirname(os.path.abspath(__file__))
-    db_host_name = 'db.dev-ops.local'
-    app_host_name = 'app.dev-ops.local'
-
-
-def create_env_file():
-    file_path = os.path.join(curr_dir, 'app_docker', 'env')
-    try:
-        print('Setting up environment for building application image')
-        port = 'PORT=%d' % app_port
-        db_url = "DB_URL='mongodb://%s:%d/%s'" % (db_host_name, db_port, db_name)
-        print('Creating env file: \n%s' % file_path)
-        fo = open(file_path, "w")
-        fo.write('%s\n%s\n' % (port, db_url))
-        fo.close()
-    except IOError:
-        print('Unable to create %s' % file_path)
+    db_instance_name = 'db.dev-ops.local'
+    app_instance_name = 'app.dev-ops.local'
 
 
 def image_exist(client, image_name):
@@ -49,16 +34,6 @@ def image_exist(client, image_name):
         return True
     except errors.ImageNotFound:
         return False
-
-
-# noinspection PyRedundantParentheses
-def get_ip_address(db_container):
-    for result in db_container.exec_run(cmd='cat /etc/hosts', stream=True):
-        for line in re.split('\\n', result):
-            if (db_host_name in line):
-                ip = re.findall(r'[0-9]+(?:\.[0-9]+){3}', line)
-                if (ip):
-                    return ip
 
 
 # noinspection PyRedundantParentheses
@@ -97,19 +72,15 @@ def run_or_start_db_container(client):
             print('Database Image not found in local repository.\nAttempting to create Database Image.')
             build_db_img()
         try:
-
+            network_bridge = get_network_interface(client)
             print('\tRunning %s container' % db_instance_name)
-            db_container = client.containers.run(db_image_tag, name=db_instance_name,
-                                                 tty=True,
-                                                 hostname=db_host_name,
-                                                 detach=True)
+            client.containers.run(db_image_tag, name=db_instance_name,
+                                  network=network_bridge.name,
+                                  hostname=db_instance_name,
+                                  tty=True,
+                                  detach=True)
+
             time.sleep(30)
-            ip = get_ip_address(db_container)
-            if ip and len(ip) == 1:
-                return ip
-            else:
-                network_bridge = get_network_interface(client)
-                network_bridge.connect(db_container, ipv4_address=db_ipv4_address)
 
         except docker.errors.ContainerError:
             print('Error')
@@ -118,69 +89,66 @@ def run_or_start_db_container(client):
 
 
 # noinspection PyRedundantParentheses
-def run_or_start_app_container(client, ip=[]):
-    containers = client.containers.list(all=True, filters={'name': app_instance_name})  # Get running containers
-
-    if (containers):
-        app_container = containers[0]
-        if (app_container.status == 'running'):
-            print('\t%s Container is running' % app_instance_name)
+def run_or_start_app_container(client, retry=3):
+    # Get Application Container
+    containers = client.containers.list(all=True, filters={'name': app_instance_name})
+    try:
+        if (containers):
+            app_container = containers[0]
+            if (app_container.status == 'running'):
+                print('\t%s Container is running' % app_instance_name)
+            else:
+                print('\tStarting %s container' % app_instance_name)
+                app_container.start()
+                run_npm_start(app_container)
         else:
-            print('\tStarting %s container' % app_instance_name)
-            app_container.start()
-            time.sleep(30)
-    else:
-        if (not image_exist(client, app_image_tag)):
-            print('Database Image not found in local repository.\nAttempting to create Application Image.')
-            build_app_img()
-        try:
+            if (not image_exist(client, app_image_tag)):
+                print('Database Image not found in local repository.\nAttempting to create Application Image.')
+                build_app_img()
 
             network_bridge = get_network_interface(client)
             print('\tRunning %s container' % app_instance_name)
 
-            if (ip):
-                address_ = {db_host_name: ip[0]}
-            else:
-                address_ = {db_host_name: db_ipv4_address}
-
             app_container = client.containers.run(app_image_tag, name=app_instance_name,
                                                   ports={'3000/tcp': 3000},
-                                                  hostname=app_host_name,
-                                                  extra_hosts=address_,
+                                                  network=network_bridge.name,
+                                                  hostname=app_instance_name,
                                                   tty=True,
                                                   detach=True)
-            if (not ip):
-                network_bridge.connect(app_container
-                                       # , ipv4_address=app_ipv4_address
-                                       )
 
-            """
-            print('Running command')
-            for line in app_container.exec_run(cmd='cat /etc/hosts', stream=True):
-                print(line)
-            """
-        except docker.errors.ContainerError:
-            print('Error')
-        except docker.errors.ImageNotFound:
-            print('Application Image not fount in Local repository.\nTry running python startup.py build-app')
+            run_npm_start(app_container)
+
+    except docker.errors.ContainerError:
+        print('Error')
+    except docker.errors.ImageNotFound:
+        print('Application Image not fount in Local repository.\nTry running python startup.py build-app')
+    except docker.errors.APIError:
+        print('ApiError')
+    except requests.exceptions.ReadTimeout:
+        print('Timeout\nretrying')
+        i = retry - 1
+        run_or_start_app_container(client, i)
+
+
+def run_npm_start(app_container):
+    env_file = "PORT=%d\nDB_URL=mongodb://%s:%d/%s\n" % (app_port, db_instance_name, db_port, db_name)
+    cmd = 'bash -c "echo \'%s\' > .env"' % env_file
+    app_container.exec_run(cmd=cmd, detach=True)
+    cmd = 'npm start'
+    app_container.exec_run(cmd=cmd, detach=True)
 
 
 # noinspection PyRedundantParentheses
 def run(client):
-    ip = run_or_start_db_container(client)
-    run_or_start_app_container(client, ip)
+    run_or_start_db_container(client)
+    run_or_start_app_container(client)
 
 
 def build_app_img():
-    # path = curr_dir + '\\app_docker'
-    # create_image(client=client, path=path, tag=app_image_tag)
-    create_env_file()
     app_docker.create_app_image(app_image_tag)
 
 
 def build_db_img():
-    # path = curr_dir + '\\db_docker'
-    # create_image(client=client, path=path, tag=db_image_tag)
     db_docker.create_db_image(db_image_tag)
 
 
@@ -219,59 +187,51 @@ def main():
         args = (argv[1:])
 
         if ('clean' in args):
+            print('clean')
             clean_container(_client, db_instance_name)
             clean_container(_client, app_instance_name)
 
         if ('clean-db' in args):
-            print('Start Application Container ')
+            print('clean database container')
             clean_container(_client, db_instance_name)
 
         if ('clean-app' in args):
-            print('Start Application Container ')
+            print('clean application container')
             clean_container(_client, app_instance_name)
 
-            # if ('test' in args):
-            # run_test()
-
         if ('init' in args):
-            print('-init')
+            print('init')
             build_image()
             run(_client)
-            # run_test()
             return
 
-        if ('build' in args):  # Example usage.
-
+        if ('build' in args):
+            print('build')
             build_image()
-
         if ('build-app' in args):
+            print('build application image')
             build_app_img()
-
         if ('build-db' in args):
+            print('build database image')
             build_db_img()
-
         if ('run' in args or len(argv) == 1):
-            print('-run')
+            print('run')
             run(_client)
-
         if ('run-db' in args):
-            print('Start Database Container ')
+            print('run database container')
             run_or_start_db_container(_client)
-
         if ('run-app' in args):
-            print('Start Application Container ')
+            print('run application container')
             run_or_start_app_container(_client)
-
         if ('stop' in args):
+            print('stop')
             stop_container(_client, db_instance_name)
             stop_container(_client, app_instance_name)
-
         if ('stop-db' in args):
-            print('Start Application Container ')
+            print('stop database container')
             stop_container(_client, db_instance_name)
-
         if ('stop-app' in args):
-            print('Start Application Container ')
+            print('stop application container')
             stop_container(_client, app_instance_name)
 
 
